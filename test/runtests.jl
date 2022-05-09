@@ -21,6 +21,16 @@ using Test
             @test tuplength(ta1) == 3
             @test firstindex(ta1) == 1
             @test lastindex(ta1) == 10
+            @test sum(prod, ta1) == 25575
         end
     end
+end
+
+@testset "Corner cases" begin
+    @test_throws MethodError TupleVector()
+    @test_throws MethodError TupleArray()
+#     @test ndims(ta) == 1
+#     @test size(ta) == (0,)
+#     @test length(ta) == 0
+#     @test tupgetdata(ta) == ()
 end
