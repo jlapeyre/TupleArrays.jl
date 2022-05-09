@@ -1,3 +1,5 @@
+import ..DictViews
+import ..DictViews: dictview, DictView
 
 export AbstractTupleArray, TupleArray, AbstractNamedTupleArray, NamedTupleArray
 export TupleMatrix, TupleVector, AbstractTupleVector, AbstractTupleMatrix,
@@ -49,6 +51,9 @@ tupgetindex(args...) = _tupgetindex(args...)
 
 _size(args...) = Base.size(args...)
 _size(t::Tuple) = (length(t),) # Preclude using Tuples for higher dim arrays
+# These have length, but you can't index into them, so no good.
+# _size(t::Base.ValueIterator) = (length(t),)
+# _size(t::Base.KeySet) = (length(t),)
 Base.size(ta::AbstractTupleArray) = _size(first(tupgetdata(ta)))
 Base.length(ta::AbstractTupleArray) = length(first(tupgetdata(ta)))
 Base.getindex(ta::AbstractTupleArray, i::Integer...) = tupgetindex(ta, i...)
@@ -68,6 +73,8 @@ struct TupleArray{Ttup, Nd, Nt} <: AbstractTupleArray{Ttup, Nd, Nt}
         return new{_construct(arrays)...}(arrays)
     end
 end
+
+TupleArray(d::AbstractDict) = TupleArray(collect(keys(d)), collect(values(d)))
 
 const TupleVector{Ttup, Nt} = TupleArray{Ttup, 1, Nt}
 const TupleMatrix{Ttup, Nt} = TupleArray{Ttup, 2, Nt}
@@ -89,19 +96,51 @@ function tupgetindex(ta::AbstractNamedTupleArray, i::Integer...)
 end
 
 struct NamedTupleArray{Ttup, Nd, Nt, Tnames} <: AbstractNamedTupleArray{Ttup, Nd, Nt, Tnames}
-    _data::Ttup
+    _data::NamedTuple{Tnames,Ttup}
     function NamedTupleArray(names::NTuple, arrays...)
-        return new{_construct(arrays)..., names}(arrays)
+        # length(names) == length(arrays) || error("bad")
+        return new{_construct(arrays)..., names}(NamedTuple{names, typeof(arrays)}(arrays))
     end
 end
+
+NamedTupleArray(names::NTuple, d::AbstractDict) = NamedTupleArray(names, collect(keys(d)), collect(values(d)))
 
 const NamedTupleVector{Ttup, Nt} = NamedTupleArray{Ttup, 1, Nt}
 const NamedTupleMatrix{Ttup, Nt} = NamedTupleArray{Ttup, 2, Nt}
 
+TupleVector(args...) = TupleArray(args...)
+TupleMatrix(args...) = TupleMatrix(args...)
 NamedTupleVector(args...) = NamedTupleArray(args...)
 NamedTupleMatrix(args...) = NamedTupleMatrix(args...)
 
 for _type in (:NamedTupleArray, :TupleArray, :AbstractTupleArray, :AbstractNamedTupleArray,
               :NamedTupleVector, :TupleVector)
     @eval _striptype(::Type{<:$_type}) = $_type
+end
+
+###
+### DictViews interface
+###
+
+DictViews.dictview_keys(ta::AbstractTupleArray) = first(tupgetdata(ta))
+
+function DictViews.dictview_values(ta::AbstractTupleArray)
+    n = length(tupgetdata(ta))
+    n == 1 && throw(ErrorException("there is no values field"))
+    n == 2 && return tupgetdata(ta)[2]
+    return tupgetdata(ta)[2:end]
+end
+
+# get a value by key
+# Default is slow linear search
+function DictViews.dictview_get(ta::AbstractTupleArray, k, default)
+    for i in eachindex(ta)
+        tup = ta[i]
+        if first(tup) == k
+            x = ta[i]
+#            return Base.rest(x, 2) # This is ok too, no faster
+            return ((x[i] for i in 2:length(x))...,)
+        end
+    end
+    return default
 end
