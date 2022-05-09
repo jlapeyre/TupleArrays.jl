@@ -26,13 +26,16 @@ using Test
     end
 end
 
+@testset "Construct" begin
+    dd = ((1,2), (3,4))
+    Ttup = typeof(dd)
+    ta = TupleArray{Ttup}(dd...)
+    @test tuptype(ta) == Ttup
+end
+
 @testset "Corner cases" begin
     @test_throws MethodError TupleVector()
     @test_throws MethodError TupleArray()
     @test_throws DimensionMismatch TupleMatrix((1,2))
     @test_throws DimensionMismatch TupleVector(zeros(2,2))
-#     @test ndims(ta) == 1
-#     @test size(ta) == (0,)
-#     @test length(ta) == 0
-#     @test tupgetdata(ta) == ()
 end

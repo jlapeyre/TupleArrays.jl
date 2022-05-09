@@ -4,10 +4,10 @@ import ..DictViews: dictview, DictView
 export AbstractTupleArray, TupleArray, AbstractNamedTupleArray, NamedTupleArray
 export TupleMatrix, TupleVector, AbstractTupleVector, AbstractTupleMatrix,
     NamedTupleVector, NamedTupleMatrix
-export tupgetdata, tupgetindex, tuplength, getnames
+export tupgetdata, tupgetindex, tuplength, getnames, tuptype
 
 # temporary export
-export _striptype, ensurevectorfields, hastuplefield
+export _striptype, ensurevectorfields, hastuplecol
 
 ###
 ### AbstractTupleArray
@@ -16,22 +16,50 @@ export _striptype, ensurevectorfields, hastuplefield
 """
     AbstractTupleArray{Ttup, Nd, Nt} <: AbstractArray{Ttup, Nd}
 
+An abstract array of `Tuple`s. In the concrete subtypes, the
+data is not stored as `Tuple`s, but rather as `Nt` `Arrays`, where
+`Nt` is the length of each `Tuple`.
+
 `Ttup` is the data type of the array. It is `<:Tuple`.
 `Nd` is the dimension of the array.
 `Nt` is the length of each `Tuple` in the array.
+
+#Examples
+
+If `Nt=4` and `Nd=2`, then the array is a matrix of `4-Tuples`.
 """
 abstract type AbstractTupleArray{Ttup, Nd, Nt} <: AbstractArray{Ttup, Nd} end
 const AbstractTupleVector{Ttup} = AbstractTupleArray{Ttup, 1, Nt} where {Ttup, Nt}
 const AbstractTupleMatrix{Ttup} = AbstractTupleArray{Ttup, 2, Nt} where {Ttup, Nt}
 
+"""
+    tuplength(ta::AbstractTupleArray)
 
-# Length  of tuple (typically number of fields in struct)
+Length  of each `Tuple` contained in `ta`.
+"""
 tuplength(ta::AbstractTupleArray{<:Any,<:Any,Nt}) where Nt = Nt
+
+
+"""
+    tuptype(ta::AbstractTupleArray)
+
+Type of the `Tuple`s contained in `ta`.
+"""
+tuptype(ta::AbstractTupleArray{Ttup}) where Ttup = Ttup
+
 tupgetdata(ta::AbstractTupleArray) = getfield(ta, :_data)
 
 Base.ndims(ta::AbstractTupleArray{<:Any, Nd}) where Nd = Nd
 
-hastuplefield(ta::AbstractTupleArray) = any(x->isa(x,Tuple), tupgetdata(ta))
+"""
+    hastuplecol(ta::AbstractTupleArray)
+
+Return `true` if any column in `ta` is a `Tuple`.
+
+The elements of `ta` are always `Tuple`s. But, the columns may
+other containers.
+"""
+hastuplecol(ta::AbstractTupleArray) = any(x->isa(x,Tuple), tupgetdata(ta))
 
 """
     ensurevectorfields(fieldtup)
@@ -40,7 +68,7 @@ Copy the tuple of containers `fieldtup` converting any `Tuple` to a `Vector`.
 This is probably not robust. Hard to say what needs to be converted.
 """
 ensurevectorfields(fieldtup) = ((isa(x,Tuple) ? collect(x) : x for x in fieldtup)...,)
-ensurevectorfields(ta::AbstractTupleArray) = !hastuplefield(ta) ? ta :
+ensurevectorfields(ta::AbstractTupleArray) = !hastuplecol(ta) ? ta :
     _striptype(typeof(ta))(ensurevectorfields(tupgetdata(ta))...,)
 
 
@@ -57,7 +85,7 @@ Base.getindex(tup::Tuple, i::Integer, j::Integer) = getindex(tup, i)
 # But, the below will print the wrong type if it converts Tuples to Vectors.
 # So we use the pirate hack, instead.
 # function Base.show(io::IO, ::MIME"text/plain", ta::AbstractTupleArray)
-#     tav = hastuplefield(ta) ? ensurevectorfields(ta) : ta
+#     tav = hastuplecol(ta) ? ensurevectorfields(ta) : ta
 #     nd = ndims(ta)
 #     invoke(show, Tuple{IO,MIME"text/plain", AbstractArray{<:Any,nd}}, io, MIME"text/plain"(), tav)
 # end
@@ -81,44 +109,38 @@ Base.length(ta::AbstractTupleArray) = prod(size(ta))
 
 Base.getindex(ta::AbstractTupleArray, i::Integer...) = tupgetindex(ta, i...)
 
-function _construct(arrays, dims=-1)
+function _construct(arrays, dims=-1, _Nt=-1)
     isempty(arrays) && throw(MethodError(TupleArray, ()))
     asize = _size(first(arrays))
     all(x -> _size(x) == asize, arrays) || throw(DimensionMismatchError("Elements of Tuples must have the same dimension"))
-    _Nd = length(asize)
-    dims >= 0 && dims != _Nd &&
-        throw(DimensionMismatch("Can't construct a $(dims)-dimensional TupleArray with $(_Nd)-dimensional data"))
-    _Ttup = typeof(arrays)
-    _Nd = length(asize)
-    _Nt = length(arrays)
-    return (_Ttup, _Nd, _Nt)
+    Nd = length(asize)
+    dims >= 0 && dims != Nd &&
+        throw(DimensionMismatch("Can't construct a $(dims)-dimensional TupleArray with $(Nd)-dimensional data"))
+    Ttup = typeof(arrays)
+    Nd = length(asize)
+    Nt = length(arrays)
+    _Nt >=0 && Nt != _Nt &&
+        throw(DimensionMismatch("Can't construct a Tuples of length $_Nt with $Nt input arrays."))
+    return (Ttup, Nd, Nt)
 end
 
 struct TupleArray{Ttup, Nd, Nt} <: AbstractTupleArray{Ttup, Nd, Nt}
     _data::Ttup
 
     TupleArray(arrays...) = new{_construct(arrays)...}(arrays)
+    TupleArray{Ttup}(arrays...) where {Ttup} = new{_construct(arrays)...}(arrays)
     TupleArray{Ttup,Nd}(arrays...) where {Ttup, Nd} = new{_construct(arrays, Nd)...}(arrays)
-
-    # This may not be useful.
-    function TupleArray{Ttup, Nd, Nt}(arrays...) where {Ttup, Nd, Nt}
-        asize = isempty(arrays) ? ((0 for _ in 1:Nt)...,) : _size(first(arrays))
-        @show asize
-        all(x -> _size(x) == asize, arrays) || throw(DimensionMismatchError("bad dims"))
-        _Ttup = typeof(arrays)
-        _Nd = length(asize)
-        _Nt = length(arrays)
-        _Ttup == Ttup || error("Type $_Ttup != $Ttup")
-        _Nd == Nd || error("Dimensions $_Nd != $Nd")
-        _Nt == Nt || error("Tuple length $_Nt != $Nt")
-        return new{Ttup, Nd, Nt}(arrays)
-    end
+    TupleArray{Ttup,Nd,Nt}(arrays...) where {Ttup, Nd, Nt} = new{_construct(arrays, Nd, Nt)...}(arrays)
 end
 
 TupleArray(d::AbstractDict) = TupleArray(collect(keys(d)), collect(values(d)))
 
 const TupleVector{Ttup, Nt} = TupleArray{Ttup, 1, Nt}
 const TupleMatrix{Ttup, Nt} = TupleArray{Ttup, 2, Nt}
+
+###
+### AbstractNamedTupleArray
+###
 
 abstract type AbstractNamedTupleArray{Ttup, Nd, Nt, Tnames} <: AbstractTupleArray{Ttup, Nd, Nt} end
 
@@ -134,11 +156,30 @@ function tupgetindex(ta::AbstractNamedTupleArray, i::Integer...)
     return NamedTuple{names, typeof(tup)}(tup)
 end
 
+
+function _check_name_length(names, arrays)
+    length(names) == length(arrays) ||
+        throw(DimensionMismatch(
+            "Number of names $(length(names)) differ from number of columns $(length(arrays))."))
+    return true
+end
+
 struct NamedTupleArray{Ttup, Nd, Nt, Tnames} <: AbstractNamedTupleArray{Ttup, Nd, Nt, Tnames}
     _data::NamedTuple{Tnames,Ttup}
+
     function NamedTupleArray(names::NTuple, arrays...)
-        # length(names) == length(arrays) || error("bad")
+        _check_name_length(names, arrays)
         return new{_construct(arrays)..., names}(NamedTuple{names, typeof(arrays)}(arrays))
+    end
+
+    function NamedTupleArray{Ttup,Nd}(names::NTuple, arrays...) where {Ttup, Nd}
+        _check_name_length(names, arrays)
+        return new{_construct(arrays, Nd)..., names}(NamedTuple{names, typeof(arrays)}(arrays))
+    end
+
+    function NamedTupleArray{Ttup,Nd,Nt}(names::NTuple, arrays...) where {Ttup, Nd, Nt}
+        _check_name_length(names, arrays)
+        return new{_construct(arrays, Nd, Nt)..., names}(NamedTuple{names, typeof(arrays)}(arrays))
     end
 end
 
@@ -149,8 +190,9 @@ const NamedTupleMatrix{Ttup, Nt} = NamedTupleArray{Ttup, 2, Nt}
 
 TupleVector(args...) = TupleArray{typeof(args),1}(args...)
 TupleMatrix(args...) = TupleArray{typeof(args),2}(args...)
-NamedTupleVector(args...) = NamedTupleArray(args...)
-NamedTupleMatrix(args...) = NamedTupleMatrix(args...)
+
+NamedTupleVector(names, args...) = NamedTupleArray{typeof(args),1}(names, args...)
+NamedTupleMatrix(names, args...) = NamedTupleArray{typeof(args),2}(names, args...)
 
 for _type in (:NamedTupleArray, :TupleArray, :AbstractTupleArray, :AbstractNamedTupleArray,
               :NamedTupleVector, :TupleVector)
