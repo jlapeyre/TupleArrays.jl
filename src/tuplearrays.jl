@@ -81,10 +81,13 @@ Base.length(ta::AbstractTupleArray) = prod(size(ta))
 
 Base.getindex(ta::AbstractTupleArray, i::Integer...) = tupgetindex(ta, i...)
 
-function _construct(arrays, dims=0)
-    isempty(arrays) && throw(ErrorException("Empty TupleArray not supported."))
-    asize = isempty(arrays) ? (0,) : _size(first(arrays))
+function _construct(arrays, dims=-1)
+    isempty(arrays) && throw(MethodError(TupleArray, ()))
+    asize = _size(first(arrays))
     all(x -> _size(x) == asize, arrays) || throw(DimensionMismatchError("Elements of Tuples must have the same dimension"))
+    _Nd = length(asize)
+    dims >= 0 && dims != _Nd &&
+        throw(DimensionMismatch("Can't construct a $(dims)-dimensional TupleArray with $(_Nd)-dimensional data"))
     _Ttup = typeof(arrays)
     _Nd = length(asize)
     _Nt = length(arrays)
@@ -93,13 +96,9 @@ end
 
 struct TupleArray{Ttup, Nd, Nt} <: AbstractTupleArray{Ttup, Nd, Nt}
     _data::Ttup
-    function TupleArray(arrays...)
-        isempty(arrays) && throw(MethodError(TupleArray, ()))
-        return new{_construct(arrays)...}(arrays)
-    end
 
-    # function TupleArray{Ttup,Nd}(arrays...)
-    # end
+    TupleArray(arrays...) = new{_construct(arrays)...}(arrays)
+    TupleArray{Ttup,Nd}(arrays...) where {Ttup, Nd} = new{_construct(arrays, Nd)...}(arrays)
 
     # This may not be useful.
     function TupleArray{Ttup, Nd, Nt}(arrays...) where {Ttup, Nd, Nt}
@@ -148,8 +147,8 @@ NamedTupleArray(names::NTuple, d::AbstractDict) = NamedTupleArray(names, collect
 const NamedTupleVector{Ttup, Nt} = NamedTupleArray{Ttup, 1, Nt}
 const NamedTupleMatrix{Ttup, Nt} = NamedTupleArray{Ttup, 2, Nt}
 
-TupleVector(args...) = TupleArray(args...)
-TupleMatrix(args...) = TupleMatrix(args...)
+TupleVector(args...) = TupleArray{typeof(args),1}(args...)
+TupleMatrix(args...) = TupleArray{typeof(args),2}(args...)
 NamedTupleVector(args...) = NamedTupleArray(args...)
 NamedTupleMatrix(args...) = NamedTupleMatrix(args...)
 
